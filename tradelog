@@ -1,0 +1,720 @@
+#!/usr/bin/bash
+
+
+#######################################################
+# Marcel Feiler										  #
+# xfeile00											  #
+# Konzulutujuci a hodnoti: dr. Ondrej Lengal		  #
+#													  #
+# 2020/2021											  #
+#######################################################
+
+export POSIXLY_CORRECT=yes
+export LC_NUMERIC=en_US.UTF-8
+
+#FUNCTIONS --------------------------------------------------------
+
+help_com() {
+	echo "Napoveda: tradelog [-h|--help]"
+	echo "Povolena postupnost argumentov: tradelog [FILTER...] [PRIKAZY] [LOG..[LOG1...]]"
+	echo "-------------------------------------------------------------------"
+	echo ""
+	echo "Prikazy: (jeden z)"
+	echo "list-tick – výpis seznamu vyskytujících se burzovních symbolů, tzv. “tickerů”"
+	echo "profit – výpis celkového zisku z uzavřených pozic"
+	echo "pos – výpis hodnot aktuálně držených pozic seřazených sestupně dle hodnoty"
+	echo "last-price – výpis poslední známé ceny pro každý ticker"
+	echo "hist-ord – výpis histogramu počtu transakcí dle tickeru"
+	echo "graph-pos – výpis grafu hodnot držených pozic dle tickeru"
+	echo "-------------------------------------------------------------------"
+	echo "Filter: (kombinacia)"
+	echo "-a DATETIME – after: jsou uvažovány pouze záznamy PO tomto datu (bez tohoto data). DATETIME je formátu YYYY-MM-DD HH:MM:SS"
+	echo "-b DATETIME – before: jsou uvažovány pouze záznamy PŘED tímto datem (bez tohoto data)"
+	echo "-t TICKER – jsou uvažovány pouze záznamy odpovídající danému tickeru. Při více výskytech přepínače se bere množina všech uvedených tickerů"
+	echo "-w WIDTH – u výpisu grafů nastavuje jejich šířku, tedy délku nejdelšího řádku na WIDTH. Tedy, WIDTH musí být kladné celé číslo. Více výskytů přepínače je chybné spuštění"
+}
+
+
+
+
+
+
+
+#-----------------------------------------------------------------
+
+
+
+
+
+
+
+if [ "$#" -lt 0 ]; then
+	echo "Not enough arguments"
+fi
+
+if [ "$0" != "./tradelog" ]; then
+	echo "Invalid name of script, try again"
+fi	
+###################Premenne##############
+file="${@: -1}"
+argument=""
+prikaz=()
+filter=()
+pole=()
+log_file=""
+gz_log=""
+n_arg="$#"
+n_prikaz=0
+filters=()
+n_filters=0
+n_tickers=0
+arr_tick=()
+adate=""
+bdate=""
+h_width=1
+g_width=1000
+##############################################
+#	LOADING ARGUMENTS TO VARIABLE			 #
+##############################################
+
+#echo $file
+#echo ${file:(-3)}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+
+		list-tick | pos | profit | last-price | hist-ord | graph-pos)
+			n_prikaz=$(( n_prikaz + 1 ))
+			if [ "$n_prikaz" -gt 1 ]; then
+				echo "ERROR: Argument of type COMMAND can have just one occurence"
+				exit 1
+			fi	
+			argument="$1"
+			shift
+			prikaz+=($argument)
+
+			;;
+		-h | --help)
+			help_com
+			exit 0
+			;;
+		-w)
+			filter="$1"	
+			width="$2"
+			shift
+			shift
+            h_width=$width
+            g_width=$width
+            filters+=($filter)
+            filters+=($width)
+            n_filters=$(( n_filters+2 ))
+			;;
+		-t)
+			filter="$1"	
+			ticker="$2"
+			shift
+			shift
+            arr_tick+=($ticker)
+            filters+=($filter)
+            filters+=($ticker)
+            n_filters=$(( n_filters+3 ))
+            n_tickers=$(( n_tickers+1 ))
+			;;
+		-b)
+		    filter="$1"	
+			byear="$2"
+			bhour="$3"
+            bdate="$2 $3"
+            #echo $bdate
+			shift
+			shift
+			shift
+            filters+=($filter)
+            filters+=($byear)
+            filters+=($bhour)
+            n_filters=$(( n_filters+3 ))
+			;;
+		-a)
+			filter="$1"	
+			ayear="$2"
+			ahour="$3"
+            adate="$2 $3"
+			shift
+			shift
+			shift
+            filters+=($filter)
+            filters+=($ayear)
+            filters+=($ahour)
+            n_filters=$(( n_filters+3 ))
+			;;
+		*)
+			argument="$1"
+			if [ ${argument:(-3)} = ".gz" ]; then #ends with .gz
+				gz_log="$1 $gz_log"				
+				gzip -dk $gz_log
+				shift
+			elif [ ${argument:(-3)} = "log" ]; then	  #ends with .log
+				log_file="$1 $log_file"								
+				shift
+			else
+				echo "ERROR: '$1' argument is not valid, type './tradelog -h' for more information"
+				shift
+				exit 1					
+			fi
+			;;
+
+	esac
+
+done
+
+#########################END OF LOADING ARGUMENTS TO VARIABLES AND ARRAYS###############################
+
+#----------------------------------
+#COMMAND     FILTER
+#----------------------------------
+#VARIABLES
+#--------------
+j=0
+i=0
+opakovanie=0
+output=1
+n_trans=0
+tmp=$log_file
+counter=0
+max_length=0
+#---------------
+
+if [ $n_arg -eq 1 ] && [ $log_file != "" ]; then
+	cat $log_file
+	exit 0
+elif [ $n_arg -eq 1 ] && [ $gz_log != "" ]; then
+	cat $gz_file
+	exit 0
+elif [ $n_arg -eq 0 ]; then
+	exit 0
+fi
+
+
+
+
+if [ $log_file != "" ] || [ $gz_log != "" ]; then
+
+
+#####LOOP FOR FILTERS#####
+
+    if [ $n_tickers -gt 0 ]; then
+       
+        if [ "$adate" != "" ] && [ "$bdate" != "" ]; then
+            tmp=$(awk -F'[;]' -v arr="${arr_tick[*]}" -v bdate="$bdate" -v adate="$adate" -v n_tickers=$n_tickers '{
+                split(arr,arr_tick," ");
+            
+                for (i = 1; i <= n_tickers; i++) {
+                    if (arr_tick[i] == $2 && $1 > adate && $1 < bdate) {
+                        print $0;
+                    }    
+
+                    
+                }        
+    
+            }' $log_file )
+
+        elif [ "$adate" != "" ] && [ "$bdate" == "" ]; then
+            tmp=$(awk -F'[;]' -v arr="${arr_tick[*]}" -v bdate="$bdate" -v adate="$adate" -v n_tickers=$n_tickers '{
+                split(arr,arr_tick," ");
+
+                for (i = 1; i <= n_tickers; i++) {
+                    if (arr_tick[i] == $2 && $1 > adate) {
+                        print $0;
+                    }
+                }
+
+            }' $log_file )
+        
+        elif [ "$adate" == "" ] && [ "$bdate" != "" ]; then
+            tmp=$(awk -F'[;]' -v arr="${arr_tick[*]}" -v bdate="$bdate" -v adate="$adate" -v n_tickers=$n_tickers '{
+                split(arr,arr_tick," ");
+            
+                for (i = 1; i <= n_tickers; i++) {
+                    if (arr_tick[i] == $2 && $1 < bdate) {
+                        print $0;                      
+                    }    
+ 
+                     
+                }
+            }' $log_file )
+
+        elif [ "$adate" == "" ] && [ "$bdate" == "" ]; then
+            tmp=$(awk -F'[;]' -v arr="${arr_tick[*]}" -v bdate="$bdate" -v adate="$adate" -v n_tickers=$n_tickers '{
+                split(arr,arr_tick," ");
+            
+                for (i = 1; i <= n_tickers; i++) {
+                    if (arr_tick[i] == $2) {
+                        print $0;                      
+                    }    
+  
+                      
+                }
+            }' $log_file )
+
+        
+        fi
+
+
+    fi    
+
+
+    if [ $n_tickers -eq 0 ]; then
+        tmp=$(awk -F'[;]' -v bdate="$bdate" -v adate="$adate" '{
+            if (bdate != "" && adate != "" ) {
+                if ($1 > adate && $1 < bdate) {
+                    print $0;
+                }    
+            }    
+
+            if (bdate != "" && adate == "" ) {
+                if ($1 < bdate) {
+                    print $0;
+                }    
+            }   
+
+            if (bdate == "" && adate != "" ) {
+                if ($1 > adate) {
+                    print $0;
+                }    
+            }
+
+            if (bdate == "" && adate == "" ) {
+                print $0;  
+            }
+            
+    
+    
+    }' $log_file)
+
+
+    fi
+
+	
+
+	#echo "$tmp"
+		
+		
+		
+	
+
+
+#####END OF FILTERS#####
+
+
+
+
+
+#####LOOP FOR COMMAND#####
+	while [ $j -le $n_arg ]; do
+		
+		if [ "${prikaz[j]}" = "list-tick" ]; then #LIST-TICK DONE
+			
+		    echo $tmp | awk -F'[;]' '{ if (a[$2]++ == 0) print $2|"$2 sort -n"}'
+		fi
+	
+
+		if [ "${prikaz[j]}" = "profit" ]; then #PROFIT DONE
+			
+			echo "$tmp" | awk -F'[;]' '{
+			if($3 == "sell") {
+				sell += $4 * $6;
+				
+			}	
+
+			if($3 == "buy") {
+				buy += $4 * $6;
+				
+			}
+
+			} END {printf "%.2f", sell - buy;}'
+			echo ""			
+		fi
+
+
+        if [ "${prikaz[j]}" = "graph-pos" ]; then
+            tmp_gpos=$(echo "$tmp" | awk -F'[;]' '{print $2";"$0}' | sort)
+           
+            max_pos=$(echo "$tmp_gpos" | awk -F'[;]' -v counter=$counter -v max_length=$maxlength '{
+                
+                
+                if (counter == 0) {
+                    prev_tick = $1;            
+                } 
+
+                if (prev_tick == $1) {
+                    if ($4 == "sell") {
+                        sell_volume += $7;
+                        }
+
+                    if ($4 == "buy") {
+                        buy_volume += $7;
+                    }   
+
+                    unit_price = $5;
+                    #print $0;
+               }   
+                 
+                if (prev_tick != $1) {
+                    held_units= buy_volume - sell_volume;
+                    pos= held_units * unit_price;                                     
+                    #printf prev_tick"     :  " "%.2f", pos;
+                    #print "";
+                    prev_tick = $1;
+                    pos_u= pos;
+
+                    if (pos_u < 0) {
+                        pos_u= pos - pos - pos;
+                    }    
+
+                    if ( max_length <= pos_u ) {
+                        max_length = pos_u;
+                    }
+                    sell_volume = 0;
+                    buy_volume = 0;
+                    pos= 0;
+                    unit_price= 0;
+                    
+
+                    if (prev_tick == $1) {
+                        if ($4 == "sell") {
+                            sell_volume += $7;
+                        }
+
+                        if ($4 == "buy") {
+                            buy_volume += $7;
+                        }
+
+                        unit_price = $5;
+                        
+                    }
+                }   
+ 
+                counter++;
+ 
+            } END {held_units= buy_volume - sell_volume; pos= held_units * unit_price; pos_u = pos; if (pos_u < 0){pos_u= pos - pos - pos} if ( max_length <= pos_u ) {max_length = pos_u} printf "%.2f", max_length;}') 
+            #ak je maximum zaporne vypise sa nam kladne
+            
+            
+
+            
+            gr_pos=$(echo "$tmp_gpos" | awk -F'[;]' -v counter=$counter '{
+                 
+                if (counter == 0) {
+                    prev_tick = $1;
+            
+                } 
+
+                if (prev_tick == $1) {
+                    if ($4 == "sell") {
+                        sell_volume += $7;
+                    }
+
+                    if ($4 == "buy") {
+                        buy_volume += $7;
+                    }   
+                    
+                    unit_price = $5;
+                    #print $0;
+               }   
+                 
+                if (prev_tick != $1) {
+                    held_units= buy_volume - sell_volume;
+                    pos= held_units * unit_price;
+                    #print buy_volume;
+                    #print sell_volume;
+                    printf prev_tick":" "%.2f", pos;
+                    print "";
+                    prev_tick = $1;
+                    sell_volume = 0;
+                    buy_volume = 0;
+                    pos= 0;
+                    unit_price= 0;
+        
+                    if (prev_tick == $1) {
+                        if ($4 == "sell") {
+                            sell_volume += $7;
+                        }
+
+                        if ($4 == "buy") {
+                            buy_volume += $7;
+                        }
+
+                        unit_price = $5;
+                        
+                        }
+                    }
+
+                counter++;
+
+            } END {held_units= buy_volume - sell_volume; pos= held_units * unit_price; printf prev_tick":" "%.2f", pos;}')  
+                
+    
+            
+
+             
+            
+            overall_gr_pos=$(echo "$gr_pos" | awk -F'[:]' -v g_width=$g_width -v max_pos=$max_pos '{
+                  
+                pos = $2;
+                act_pos= $2;
+                unit = max_pos / g_width;
+                printf ("%-10s:", $1);
+                if ($2<0) {
+                    act_pos = pos - pos - pos;
+                    
+                }
+
+                num_parts = act_pos / unit;
+                
+                if (num_parts < 1) {
+                    printf("\n");
+                }    
+
+                else {
+                
+                    if (pos < 0) {
+                        printf (" ");
+                        for (i=1; i< int (num_parts); i++) {
+                            printf "!";
+                        }    
+                        printf "!";
+
+                    }
+
+                    else if (pos > 0) {
+                        printf(" ");
+                        for (i=1; i<int (num_parts); i++) {
+                            printf "#";
+                        }    
+                        printf "#";
+                
+                    }    
+                    printf ("\n");
+                }
+
+               
+
+
+            }')
+    
+
+            echo "$overall_gr_pos"
+
+
+        fi    
+
+
+		if [ "${prikaz[j]}" = "pos" ]; then
+			#awk -F'[;]' '{print $2";"$0}' "$tmp"
+			#tmp_log=$(echo $log_file | awk -F ';' '{print $0; sort -nk2}')
+             #| sort | sed 's/*;//')
+		
+			
+			            
+            tmp_pos=$(echo "$tmp" | awk -F'[;]' '{print $2";"$0}' | sort)
+
+
+            #premenne:  prev_tick held_units unit_price sell_volume buy_volume
+            
+            pos=$(echo "$tmp_pos" | awk -F'[;]' -v counter=$counter '{
+                
+                if (counter == 0) {
+                    prev_tick = $1;
+            
+                } 
+
+                if (prev_tick == $1) {
+                    if ($4 == "sell") {
+                        sell_volume += $7;
+                    }
+
+                    if ($4 == "buy") {
+                        buy_volume += $7;
+                    }   
+                    
+                    unit_price = $5;
+                    #print $0;
+               }   
+                
+                if (prev_tick != $1) {
+                    held_units= buy_volume - sell_volume;
+                    pos= held_units * unit_price;
+                    #print buy_volume;
+                    #print sell_volume;
+                    printf prev_tick"     :  " "%.2f", pos;
+                    print "";
+                    prev_tick = $1;
+                    sell_volume = 0;
+                    buy_volume = 0;
+                    pos= 0;
+                    unit_price= 0;
+        
+                    if (prev_tick == $1) {
+                        if ($4 == "sell") {
+                            sell_volume += $7;
+                        }
+
+                        if ($4 == "buy") {
+                            buy_volume += $7;
+                        }
+
+                        unit_price = $5;
+                        
+                        }
+                    }
+
+                counter++;
+
+            } END {held_units= buy_volume - sell_volume; pos= held_units * unit_price; printf prev_tick"     :  " "%.2f", pos;}')
+
+
+            echo "$pos" | awk -F'[:]' '{
+                 print $0 | "sort -k2";
+                 
+                
+            }'
+
+        fi
+
+        if [ "${prikaz[j]}" = "last-price" ]; then
+
+            
+        
+		    tmp_lp=$(echo "$tmp" | awk -F'[;]' '{print $2";"$0}' | sort)
+            
+            lp=$(echo "$tmp_lp" | awk -F'[;]' -v counter=$counter '{
+
+                if (counter == 0) {
+                    prev_tick = $1;
+
+                }
+
+                if (prev_tick == $1) {
+                    unit_price = $5;
+                    }
+
+                if (prev_tick != $1) {                                                                               
+                    printf prev_tick"     :  " "%.2f", unit_price;
+                    print " ";
+                    prev_tick = $1;                                                           
+                    unit_price= 0;
+
+                    if (prev_tick == $1) {
+                        unit_price = $5;
+                    }
+                }
+
+                counter++;
+
+            } END {printf prev_tick"     :  " "%.2f", unit_price;}')
+
+            echo "$lp"
+
+          
+        fi
+
+
+        if [ "${prikaz[j]}" = "hist-ord" ]; then
+            
+            tmp_ho=$(echo "$tmp" | awk -F'[;]' '{print $2";"$0}' | sort)
+         
+            echo "$tmp_ho" | awk -F'[;]' -v counter=$counter -v n_trans=$n_trans -v h_width=$h_width '{
+                
+            
+                znak="#";    
+                
+
+                if (counter == 0) {
+                    prev_tick = $1;
+                
+                }
+
+                if (prev_tick == $1) {
+                    n_trans ++;
+                    last_trans = n_trans;
+                }    
+
+                if (prev_tick != $1) {
+                    sirka = n_trans / h_width; # pocet hashtagov
+                    printf prev_tick":";
+                    prev_tick = $1;
+                    
+                    if (sirka >= 1) {
+
+                        for (i = 1; i < sirka ; i++) {
+                                printf "#";                                
+                        }
+
+                        print "#";
+
+                           
+                    }
+
+                    else {
+                        print "";
+                    }    
+           
+                                            
+                    n_trans = 0;
+                    
+                   
+
+                    if (prev_tick == $1) {
+                        
+                        n_trans ++;
+                        
+                    }
+
+                    
+
+                 } 
+
+
+
+                counter++;
+
+            }END {sirka = last_trans / h_width; printf prev_tick":"; if (sirka >= 1) { for (i = 1; i < sirka; i++){printf "#";}printf "#";}}'
+            
+
+                
+
+
+
+
+
+        fi    
+              
+
+
+
+            
+
+
+
+		
+			
+
+
+
+        
+		
+
+
+
+
+	
+        j=$(( j + 1 ));
+
+	done
+			
+
+fi
+
+
+
+exit 0
